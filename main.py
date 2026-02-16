@@ -47,7 +47,7 @@ async def main() -> None:
     # Core services
     position_tracker = PositionTracker(event_bus)
     risk_manager = RiskManager(event_bus, position_tracker, settings)
-    order_manager = OrderManager(event_bus, settings)
+    order_manager = OrderManager(event_bus, settings, risk_manager)
     persistence = PersistenceService(event_bus, repo)
 
     # Strategy

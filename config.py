@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     use_synthetic_feed: bool = True
 
     # Risk
-    max_position_size: float = 10000.0
-    max_order_value: float = 5000.0
-    max_drawdown_pct: float = 0.05
+    max_position_size: float = 50000.0
+    max_order_value: float = 25000.0
+    max_drawdown_pct: float = 0.10
 
     # Logging
     log_level: str = "INFO"

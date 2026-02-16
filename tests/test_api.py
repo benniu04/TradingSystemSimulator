@@ -8,6 +8,7 @@ from core.event_bus import EventBus
 from db.repository import Repository
 from execution.order_manager import OrderManager
 from risk.position_tracker import PositionTracker
+from risk.risk_manager import RiskManager
 
 
 @pytest.fixture
@@ -15,7 +16,8 @@ def client():
     bus = EventBus()
     tracker = PositionTracker(bus)
     settings = Settings()
-    om = OrderManager(bus, settings)
+    rm = RiskManager(bus, tracker, settings)
+    om = OrderManager(bus, settings, rm)
     repo = Repository(settings)
     app = create_app(bus, tracker, om, repo)
     return TestClient(app)
@@ -52,7 +54,8 @@ def test_ws_portfolio():
     bus = EventBus()
     tracker = PositionTracker(bus)
     settings = Settings()
-    om = OrderManager(bus, settings)
+    rm = RiskManager(bus, tracker, settings)
+    om = OrderManager(bus, settings, rm)
     repo = Repository(settings)
     app = create_app(bus, tracker, om, repo)
 

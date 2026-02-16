@@ -21,7 +21,7 @@ async def test_full_pipeline_synthetic():
 
     tracker = PositionTracker(bus)
     risk_mgr = RiskManager(bus, tracker, settings)
-    order_mgr = OrderManager(bus, settings)
+    order_mgr = OrderManager(bus, settings, risk_mgr)
 
     # Use low z-threshold to generate signals quickly
     strategy = MeanReversionStrategy(
@@ -71,7 +71,7 @@ async def test_risk_blocks_large_order():
 
     tracker = PositionTracker(bus)
     risk_mgr = RiskManager(bus, tracker, settings)
-    order_mgr = OrderManager(bus, settings)
+    order_mgr = OrderManager(bus, settings, risk_mgr)
 
     strategy = MeanReversionStrategy(
         symbols=["TEST"], window_size=10, entry_z=1.0
@@ -123,7 +123,7 @@ async def test_graceful_shutdown():
 
     tracker = PositionTracker(bus)
     risk_mgr = RiskManager(bus, tracker, settings)
-    order_mgr = OrderManager(bus, settings)
+    order_mgr = OrderManager(bus, settings, risk_mgr)
     engine = StrategyEngine(bus)
 
     await tracker.start()

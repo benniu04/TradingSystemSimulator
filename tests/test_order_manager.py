@@ -8,6 +8,8 @@ from config import Settings
 from core.event_bus import EventBus
 from execution.order_manager import OrderManager
 from models import Event, EventType, Fill, Side, Signal, Tick
+from risk.position_tracker import PositionTracker
+from risk.risk_manager import RiskManager
 
 
 def _make_tick(symbol: str, price: float) -> Event:
@@ -32,11 +34,23 @@ def _make_signal(symbol: str, side: Side, strength: float) -> Event:
     return Event(type=EventType.SIGNAL, payload=signal)
 
 
+def _make_om(bus: EventBus, **settings_kwargs):
+    """Create an OrderManager with risk manager wired up."""
+    defaults = {"max_order_value": 100000, "max_position_size": 100000}
+    defaults.update(settings_kwargs)
+    settings = Settings(**defaults)
+    tracker = PositionTracker(bus)
+    rm = RiskManager(bus, tracker, settings)
+    om = OrderManager(bus, settings, rm)
+    return om, tracker, rm
+
+
 @pytest.mark.asyncio
 async def test_signal_creates_order():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(bus)
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     await bus.publish(_make_tick("AAPL", 150.0))
@@ -51,8 +65,9 @@ async def test_signal_creates_order():
 @pytest.mark.asyncio
 async def test_signal_produces_fill():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(bus)
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     await bus.publish(_make_tick("AAPL", 150.0))
@@ -70,8 +85,9 @@ async def test_signal_produces_fill():
 @pytest.mark.asyncio
 async def test_fill_price_near_market():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(bus)
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     market_price = Decimal("150.0000")
@@ -89,8 +105,11 @@ async def test_fill_price_near_market():
 @pytest.mark.asyncio
 async def test_quantity_from_strength():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(
+        bus, max_order_value=500000, max_position_size=500000, max_drawdown_pct=0.99
+    )
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     await bus.publish(_make_tick("AAPL", 150.0))
@@ -115,8 +134,9 @@ async def test_quantity_from_strength():
 @pytest.mark.asyncio
 async def test_buy_slippage_positive():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(bus)
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     await bus.publish(_make_tick("AAPL", 150.0))
@@ -133,8 +153,9 @@ async def test_buy_slippage_positive():
 @pytest.mark.asyncio
 async def test_sell_slippage_negative():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(bus)
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     await bus.publish(_make_tick("AAPL", 150.0))
@@ -151,8 +172,9 @@ async def test_sell_slippage_negative():
 @pytest.mark.asyncio
 async def test_get_order_by_id():
     bus = EventBus()
-    settings = Settings()
-    om = OrderManager(bus, settings)
+    om, tracker, rm = _make_om(bus)
+    await tracker.start()
+    await rm.start()
     await om.start()
 
     await bus.publish(_make_tick("AAPL", 150.0))
@@ -164,4 +186,53 @@ async def test_get_order_by_id():
     order = orders[0]
     assert om.get_order(order.id) is not None
     assert om.get_order(order.id).symbol == "AAPL"
+    await om.stop()
+
+
+@pytest.mark.asyncio
+async def test_risk_manager_blocks_order():
+    """Order exceeding max_order_value should be rejected, not filled."""
+    bus = EventBus()
+    om, tracker, rm = _make_om(bus, max_order_value=100)
+    await tracker.start()
+    await rm.start()
+    await om.start()
+
+    # 50 shares * $150 = $7500, exceeds max_order_value=100
+    await bus.publish(_make_tick("AAPL", 150.0))
+    await bus.publish(_make_signal("AAPL", Side.BUY, 0.5))
+    await asyncio.sleep(0.05)
+
+    fills = bus.get_history(EventType.FILL)
+    assert len(fills) == 0, "Order should have been blocked, not filled"
+
+    breaches = bus.get_history(EventType.RISK_BREACH)
+    assert len(breaches) >= 1
+    await om.stop()
+
+
+@pytest.mark.asyncio
+async def test_position_size_limit_blocks_accumulation():
+    """Position size limit should prevent unlimited accumulation."""
+    bus = EventBus()
+    # Max position = $2000, price = $150, so max ~13 shares
+    om, tracker, rm = _make_om(bus, max_order_value=100000, max_position_size=2000)
+    await tracker.start()
+    await rm.start()
+    await om.start()
+
+    await bus.publish(_make_tick("AAPL", 150.0))
+
+    # First order: 10 shares * $150 = $1500 position — should pass
+    await bus.publish(_make_signal("AAPL", Side.BUY, 0.1))
+    await asyncio.sleep(0.05)
+    fills_after_first = len(bus.get_history(EventType.FILL))
+    assert fills_after_first == 1
+
+    # Second order: 10 more shares would make $3000 position — should be blocked
+    await bus.publish(_make_signal("AAPL", Side.BUY, 0.1))
+    await asyncio.sleep(0.05)
+    fills_after_second = len(bus.get_history(EventType.FILL))
+    assert fills_after_second == 1, "Second order should have been blocked"
+
     await om.stop()

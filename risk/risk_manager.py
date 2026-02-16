@@ -42,30 +42,33 @@ class RiskManager:
         assert isinstance(tick, Tick)
         self._latest_prices[tick.symbol] = tick.price
 
-    def check_order(self, order: OrderRequest) -> tuple[bool, str]:
-        """Check if an order passes all risk limits.
+    async def _check_order(self, event: Event) -> None:
+        order = event.payload
+        assert isinstance(order, OrderRequest)
 
-        Returns (approved, reason). If approved is False, reason explains why.
-        """
         price = self._latest_prices.get(order.symbol, Decimal("100"))
         order_value = price * order.quantity
 
         # Check max order value
-        max_order = Decimal(str(self._settings.max_order_value))
-        if order_value > max_order:
-            return False, f"Order value {order_value} exceeds limit {max_order}"
+        if order_value > Decimal(str(self._settings.max_order_value)):
+            await self._reject(
+                order,
+                "max_order_value_exceeded",
+                f"Order value {order_value} exceeds limit {self._settings.max_order_value}",
+            )
+            return
 
-        # Check max position size (account for buy vs sell direction)
+        # Check max position size
         pos = self._positions.get_position(order.symbol)
         current_qty = pos.quantity if pos else 0
-        if order.side == Side.BUY:
-            projected_qty = current_qty + order.quantity
-        else:
-            projected_qty = current_qty - order.quantity
-        projected_value = price * abs(projected_qty)
-        max_pos = Decimal(str(self._settings.max_position_size))
-        if projected_value > max_pos:
-            return False, f"Projected position {projected_value} exceeds limit {max_pos}"
+        projected_value = price * abs(current_qty + order.quantity)
+        if projected_value > Decimal(str(self._settings.max_position_size)):
+            await self._reject(
+                order,
+                "max_position_size_exceeded",
+                f"Projected position {projected_value} exceeds limit {self._settings.max_position_size}",
+            )
+            return
 
         # Check max drawdown
         snapshot = self._positions.get_portfolio_snapshot()
@@ -73,19 +76,24 @@ class RiskManager:
             drawdown = (
                 self._positions._initial_cash - snapshot.total_equity
             ) / self._positions._initial_cash
-            max_dd = Decimal(str(self._settings.max_drawdown_pct))
-            if drawdown > max_dd:
-                return False, f"Portfolio drawdown {drawdown:.4f} exceeds limit {max_dd}"
+            if drawdown > Decimal(str(self._settings.max_drawdown_pct)):
+                await self._reject(
+                    order,
+                    "max_drawdown_exceeded",
+                    f"Portfolio drawdown {drawdown:.4f} exceeds limit {self._settings.max_drawdown_pct}",
+                )
+                return
 
-        return True, ""
+        self._logger.debug("order_approved", order_id=str(order.id))
 
-    async def reject_order(self, order: OrderRequest, reason: str) -> None:
-        """Publish rejection events for a blocked order."""
-        self._logger.warning("risk_breach", order_id=str(order.id), reason=reason)
+    async def _reject(
+        self, order: OrderRequest, rule: str, message: str
+    ) -> None:
+        self._logger.warning("risk_breach", rule=rule, message=message)
         await self._event_bus.publish(
             Event(
                 type=EventType.RISK_BREACH,
-                payload=RiskBreach(rule="order_rejected", message=reason),
+                payload=RiskBreach(rule=rule, message=message),
             )
         )
         await self._event_bus.publish(
@@ -94,7 +102,7 @@ class RiskManager:
                 payload=OrderUpdate(
                     order_id=order.id,
                     status=OrderStatus.REJECTED,
-                    reason=reason,
+                    reason=message,
                 ),
             )
         )

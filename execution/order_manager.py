@@ -16,12 +16,19 @@ from models import (
     Signal,
     Tick,
 )
+from risk.risk_manager import RiskManager
 
 
 class OrderManager:
-    def __init__(self, event_bus: EventBus, settings: Settings) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus,
+        settings: Settings,
+        risk_manager: RiskManager,
+    ) -> None:
         self._event_bus = event_bus
         self._settings = settings
+        self._risk_manager = risk_manager
         self._orders: dict[UUID, OrderRequest] = {}
         self._latest_prices: dict[str, Decimal] = {}
         self._logger = structlog.get_logger(__name__)
@@ -54,8 +61,21 @@ class OrderManager:
             strategy_id=signal.strategy_id,
         )
         self._orders[order.id] = order
+
+        # Check risk BEFORE filling
+        approved, reason = self._risk_manager.check_order(order)
+        if not approved:
+            self._logger.warning(
+                "order_rejected",
+                order_id=str(order.id),
+                symbol=order.symbol,
+                reason=reason,
+            )
+            await self._risk_manager.reject_order(order, reason)
+            return
+
         self._logger.info(
-            "order_created",
+            "order_approved",
             order_id=str(order.id),
             symbol=order.symbol,
             side=order.side.value,
