@@ -118,3 +118,59 @@ async def test_cash_decreases_on_buy():
 
     assert tracker._cash == Decimal("99000")
     await tracker.stop()
+
+
+@pytest.mark.asyncio
+async def test_sell_flip_to_short_keeps_avg_price():
+    """BUY 30, then SELL 80 — should flip to short with avg = fill price."""
+    bus = EventBus()
+    tracker = PositionTracker(bus)
+    await tracker.start()
+
+    await bus.publish(_make_fill("AAPL", Side.BUY, 30, 100.0))
+    await bus.publish(_make_fill("AAPL", Side.SELL, 80, 105.0))
+
+    pos = tracker.get_position("AAPL")
+    assert pos is not None
+    assert pos.quantity == -50
+    assert pos.avg_entry_price == Decimal("105.0000")
+    # Realized P&L from closing the 30 long shares: (105 - 100) * 30 = 150
+    assert pos.realized_pnl == Decimal("150.0")
+    await tracker.stop()
+
+
+@pytest.mark.asyncio
+async def test_buy_flip_to_long_keeps_avg_price():
+    """SELL 30 (short), then BUY 80 — should flip to long with avg = fill price."""
+    bus = EventBus()
+    tracker = PositionTracker(bus)
+    await tracker.start()
+
+    await bus.publish(_make_fill("AAPL", Side.SELL, 30, 100.0))
+    await bus.publish(_make_fill("AAPL", Side.BUY, 80, 95.0))
+
+    pos = tracker.get_position("AAPL")
+    assert pos is not None
+    assert pos.quantity == 50
+    assert pos.avg_entry_price == Decimal("95.0000")
+    # Realized P&L from closing the 30 short shares: (100 - 95) * 30 = 150
+    assert pos.realized_pnl == Decimal("150.0")
+    await tracker.stop()
+
+
+@pytest.mark.asyncio
+async def test_adding_to_short_updates_avg_price():
+    """Two sells at different prices — avg should be weighted."""
+    bus = EventBus()
+    tracker = PositionTracker(bus)
+    await tracker.start()
+
+    await bus.publish(_make_fill("AAPL", Side.SELL, 50, 100.0))
+    await bus.publish(_make_fill("AAPL", Side.SELL, 50, 110.0))
+
+    pos = tracker.get_position("AAPL")
+    assert pos is not None
+    assert pos.quantity == -100
+    # Weighted avg: (100*50 + 110*50) / 100 = 105
+    assert pos.avg_entry_price == Decimal("105.0000")
+    await tracker.stop()

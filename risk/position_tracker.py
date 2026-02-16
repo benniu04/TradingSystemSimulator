@@ -50,29 +50,40 @@ class PositionTracker:
                 new_qty = pos.quantity + fill.quantity
                 new_avg = total_cost / new_qty if new_qty > 0 else Decimal("0")
             else:
-                # Closing/reducing short
+                # Closing/reducing short (or flipping to long)
                 close_qty = min(fill.quantity, abs(pos.quantity))
                 realized = (pos.avg_entry_price - fill.price) * close_qty
                 pos = pos.model_copy(
                     update={"realized_pnl": pos.realized_pnl + realized}
                 )
                 new_qty = pos.quantity + fill.quantity
-                new_avg = pos.avg_entry_price if new_qty < 0 else fill.price
+                if new_qty < 0:
+                    new_avg = pos.avg_entry_price  # still short
+                elif new_qty > 0:
+                    new_avg = fill.price  # flipped to long
+                else:
+                    new_avg = Decimal("0")  # flat
             self._cash -= cost
         else:
             if pos.quantity <= 0:
-                # Adding to short or opening short
+                # Adding to short or opening short — weighted average
+                old_short_cost = pos.avg_entry_price * abs(pos.quantity)
                 new_qty = pos.quantity - fill.quantity
-                new_avg = fill.price if pos.quantity == 0 else pos.avg_entry_price
+                new_avg = (old_short_cost + cost) / abs(new_qty)
             else:
-                # Closing/reducing long
+                # Closing/reducing long (or flipping to short)
                 close_qty = min(fill.quantity, pos.quantity)
                 realized = (fill.price - pos.avg_entry_price) * close_qty
                 pos = pos.model_copy(
                     update={"realized_pnl": pos.realized_pnl + realized}
                 )
                 new_qty = pos.quantity - fill.quantity
-                new_avg = pos.avg_entry_price if new_qty > 0 else Decimal("0")
+                if new_qty > 0:
+                    new_avg = pos.avg_entry_price  # still long
+                elif new_qty < 0:
+                    new_avg = fill.price  # flipped to short
+                else:
+                    new_avg = Decimal("0")  # flat
             self._cash += cost
 
         pos = pos.model_copy(
