@@ -3,3 +3,5 @@ vendor/
 __pycache__/
 *.pyc
 .venv/ / venv/ / env/
+
+.env
