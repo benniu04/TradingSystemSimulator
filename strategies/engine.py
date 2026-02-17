@@ -1,7 +1,6 @@
 import structlog
-
 from core.event_bus import EventBus
-from models import Event, EventType, Tick
+from models import Event, EventType, Tick, Signal
 from strategies.base import Strategy
 
 
@@ -26,17 +25,41 @@ class StrategyEngine:
     async def _handle_tick(self, event: Event) -> None:
         tick = event.payload
         assert isinstance(tick, Tick)
+
         for strategy in self._strategies:
-            if tick.symbol in strategy.symbols or not strategy.symbols:
-                signal = await strategy.on_tick(tick)
-                if signal is not None:
-                    self._logger.info(
-                        "signal_generated",
-                        strategy=signal.strategy_id,
-                        symbol=signal.symbol,
-                        side=signal.side.value,
-                        strength=signal.strength,
-                    )
-                    await self._event_bus.publish(
-                        Event(type=EventType.SIGNAL, payload=signal)
-                    )
+            if not self._strategy_wants_symbol(strategy, tick.symbol):
+                continue
+
+            try:
+                result = await strategy.on_tick(tick)
+            except Exception:
+                self._logger.exception(
+                    "strategy_error",
+                    strategy_id=strategy.strategy_id,
+                    symbol=tick.symbol,
+                )
+                continue
+
+            if result is None:
+                continue
+
+            # Normalize to list so pairs trading (list[Signal])
+            # and single strategies (Signal) both work
+            signals = result if isinstance(result, list) else [result]
+
+            for signal in signals:
+                self._logger.info(
+                    "signal_generated",
+                    strategy=signal.strategy_id,
+                    symbol=signal.symbol,
+                    side=signal.side.value,
+                    strength=signal.strength,
+                )
+                await self._event_bus.publish(
+                    Event(type=EventType.SIGNAL, payload=signal)
+                )
+
+    @staticmethod
+    def _strategy_wants_symbol(strategy: Strategy, symbol: str) -> bool:
+        # Empty symbols list means the strategy wants everything
+        return not strategy.symbols or symbol in strategy.symbols

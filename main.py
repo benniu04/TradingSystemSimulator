@@ -15,6 +15,7 @@ from risk.position_tracker import PositionTracker
 from risk.risk_manager import RiskManager
 from strategies.engine import StrategyEngine
 from strategies.mean_reversion import MeanReversionStrategy
+from strategies.pairs_trading import PairsTradingStrategy
 
 structlog.configure(
     processors=[
@@ -50,17 +51,23 @@ async def main() -> None:
     order_manager = OrderManager(event_bus, settings, risk_manager)
     persistence = PersistenceService(event_bus, repo)
 
-    # Strategy
-    symbols = ["AAPL", "MSFT", "GOOGL"]
-    strategy = MeanReversionStrategy(symbols=symbols)
+    # Strategies — separate symbol universes to avoid conflicts
+    mean_rev_symbols = ["AAPL", "GOOGL", "AMZN"]
+    pairs_symbols = ["MSFT", "META"]
+    all_symbols = mean_rev_symbols + pairs_symbols
+
+    mean_rev = MeanReversionStrategy(symbols=mean_rev_symbols)
+    pairs = PairsTradingStrategy(symbol_a="MSFT", symbol_b="META")
+
     engine = StrategyEngine(event_bus)
-    engine.register_strategy(strategy)
+    engine.register_strategy(mean_rev)
+    engine.register_strategy(pairs)
 
     # Market data feed
     if settings.use_synthetic_feed:
-        feed = SyntheticFeed(event_bus, symbols, tick_interval=0.5)
+        feed = SyntheticFeed(event_bus, all_symbols, tick_interval=0.5)
     else:
-        feed = AlpacaFeed(event_bus, symbols, settings)
+        feed = AlpacaFeed(event_bus, all_symbols, settings)
 
     # API server
     app = create_app(event_bus, position_tracker, order_manager, repo)

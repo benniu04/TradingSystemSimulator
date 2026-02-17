@@ -12,8 +12,8 @@ class Strategy(abc.ABC):
         self._logger = structlog.get_logger(self.__class__.__name__)
 
     @abc.abstractmethod
-    async def on_tick(self, tick: Tick) -> Signal | None:
-        """Process a tick; return a Signal if the strategy wants to trade."""
+    async def on_tick(self, tick: Tick) -> Signal | list[Signal] | None:
+        """Process a tick; return a Signal (or list for pair strategies) if the strategy wants to trade."""
         ...
 
     @abc.abstractmethod

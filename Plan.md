@@ -2,7 +2,7 @@
 
 Goal: Build a production style trading backend that ingests market data, executes strategies, and tracks positions and P&L with low latency and high reliability
 
-Tech Stack: Python, Linux, PostgreSQL, asyncio/multiprocessing, REST/WeebSocket, APIs, pytest, Git.
+Tech Stack: Python, Linux, PostgreSQL, asyncio/multiprocessing, REST/WebSocket, APIs, pytest, Git.
 
 What it does:
 Simulates real-time market data feeds, runs trading strategies against live price streams, places simulated orders, updates positions and balances, persists trades to a relational database, and computes real-time risk and P&L. Includes logging, basic monitoring and failure recovery
