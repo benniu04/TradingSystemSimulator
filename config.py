@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     max_position_size: float = 50000.0
     max_order_value: float = 25000.0
     max_drawdown_pct: float = 0.10
+    stop_loss_pct: float = 0.02
 
     # Logging
     log_level: str = "INFO"

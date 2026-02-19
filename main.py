@@ -13,6 +13,7 @@ from execution.order_manager import OrderManager
 from feeds.market_data import AlpacaFeed, SyntheticFeed
 from risk.position_tracker import PositionTracker
 from risk.risk_manager import RiskManager
+from risk.stop_loss import StopLossManager
 from strategies.engine import StrategyEngine
 from strategies.mean_reversion import MeanReversionStrategy
 from strategies.pairs_trading import PairsTradingStrategy
@@ -47,6 +48,7 @@ async def main() -> None:
 
     # Core services
     position_tracker = PositionTracker(event_bus)
+    stop_loss = StopLossManager(event_bus, position_tracker, settings.stop_loss_pct)
     risk_manager = RiskManager(event_bus, position_tracker, settings)
     order_manager = OrderManager(event_bus, settings, risk_manager)
     persistence = PersistenceService(event_bus, repo)
@@ -74,6 +76,7 @@ async def main() -> None:
 
     # ── Start everything ────────────────────────
     await position_tracker.start()
+    await stop_loss.start()
     await risk_manager.start()
     await order_manager.start()
     await persistence.start()
@@ -113,6 +116,7 @@ async def main() -> None:
     await engine.stop()
     await order_manager.stop()
     await risk_manager.stop()
+    await stop_loss.stop()
     await position_tracker.stop()
     await persistence.stop()
     api_server.should_exit = True
